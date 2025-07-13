@@ -85,7 +85,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: neovim-offline-${{ github.run_number }}
-          name: Neovim Offline Package #${{ github.run_number }}
+          name: Neovim Alpine #${{ github.run_number }}
           files: |
             release/neovim-x86_64.tar.gz
             release/neovim-aarch64.tar.gz
