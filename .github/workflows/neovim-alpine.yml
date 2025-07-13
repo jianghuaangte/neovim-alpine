@@ -18,10 +18,10 @@ jobs:
       VERSION: edge
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install tools
+      - name: Install necessary tools
         run: |
           apk update
           apk add curl tar git bash
@@ -35,14 +35,14 @@ jobs:
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
           apk update
 
-      - name: Fetch Neovim and dependencies APKs (arch=${{ env.ARCH }})
+      - name: Fetch Neovim APKs and dependencies for $ARCH
         run: |
           mkdir -p neovim-${ARCH}
           cd neovim-${ARCH}
           apk fetch --recursive --output . neovim
           cd ..
 
-      - name: Install Neovim to get version (arch=${{ env.ARCH }})
+      - name: Install Neovim locally to get version ($ARCH)
         run: |
           apk add --allow-untrusted --no-network --cache-dir ./neovim-${ARCH} ./neovim-${ARCH}/*.apk
 
@@ -52,22 +52,28 @@ jobs:
           NVIM_VER=$(nvim --version | head -1 | awk '{print $2}')
           echo "version=$NVIM_VER" >> $GITHUB_OUTPUT
 
-      - name: Create Git Tag and push (only on first arch)
+      - name: Create Git Tag and Push (only on x86_64)
         if: matrix.arch == 'x86_64'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          cd $GITHUB_WORKSPACE
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
           TAG="v${{ steps.get_version.outputs.version }}"
-          git tag "$TAG"
-          git push origin "$TAG"
+          # 判断 Tag 是否已存在，避免重复推送错误
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping tag creation."
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
 
-      - name: Package offline tarball (arch=${{ env.ARCH }})
+      - name: Package offline tarball for $ARCH
         run: |
           tar czf neovim-${ARCH}-v${{ steps.get_version.outputs.version }}.tar.gz neovim-${ARCH}
 
-      - name: Create GitHub Release (only once, on x86_64)
+      - name: Create GitHub Release (only once on x86_64)
         if: matrix.arch == 'x86_64'
         id: create_release
         uses: actions/create-release@v1
@@ -79,7 +85,7 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Upload Release Asset (arch=${{ env.ARCH }})
+      - name: Upload Release Asset ($ARCH)
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
