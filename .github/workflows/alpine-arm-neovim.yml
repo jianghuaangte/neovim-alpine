@@ -77,9 +77,20 @@ jobs:
         run: |
           mkdir -p tmp
           tar -xzf ./artifacts/neovim-x86_64.tar.gz -C tmp
-          chmod +x tmp/usr/bin/nvim
-          version=$(tmp/usr/bin/nvim --version | grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
-          echo "Neovim version: $version"
+
+          # 查找 APK 文件（通常只有一个）
+          apk_file=$(find tmp -name "neovim-*.apk" | head -n1)
+          echo "Found APK: $apk_file"
+
+          # 解压 APK 文件内容
+          mkdir -p tmp/apk
+          tar -xzf "$apk_file" -C tmp/apk
+
+          # 找到 nvim 可执行文件路径（通常是 usr/bin/nvim）
+          chmod +x tmp/apk/usr/bin/nvim
+
+          version=$(tmp/apk/usr/bin/nvim --version | grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+          echo "Extracted version: $version"
           echo "version=$version" >> $GITHUB_OUTPUT
 
       - name: Check if release tag already exists
