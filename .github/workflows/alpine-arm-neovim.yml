@@ -11,14 +11,11 @@ jobs:
     runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
-        arch: [x86_64, aarch64]
+        arch: [aarch64]
 
     container: alpine:edge
 
     steps:
-      - name: 📂 Checkout Repository
-        uses: actions/checkout@v4
-
       - name: 🔧 Install Tools
         run: |
           apk update
