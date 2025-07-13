@@ -1,0 +1,67 @@
+name: Neovim-arm-alpine
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+
+    container: alpine:edge
+
+    steps:
+      - name: 📂 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔧 Install Tools
+        run: |
+          apk update
+          apk add curl tar git bash
+
+      - name: 📦 Fetch Neovim APKs Only (No Install)
+        id: fetch_neovim
+        run: |
+          APK_ARCH=${{ matrix.arch }}
+
+          PKGDIR="neovim-${APK_ARCH}"
+          mkdir -p "$PKGDIR"
+
+          # 配置 edge 仓库
+          echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories
+          echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+          apk update
+
+          # 下载 neovim 及依赖包
+          apk fetch --recursive --output "$PKGDIR" neovim
+
+          # 解析版本号
+          NEOVIM_APK=$(ls "$PKGDIR"/neovim-*.apk | head -n 1)
+          if [ -z "$NEOVIM_APK" ]; then
+            echo "Neovim APK not found!"
+            exit 1
+          fi
+
+          VERSION=$(basename "$NEOVIM_APK" | sed -E 's/neovim-([0-9]+\.[0-9]+\.[0-9]+)-r[0-9]+\.apk/\1/')
+
+          OUTPUT="neovim-${VERSION}-${APK_ARCH}.tar.gz"
+          tar czf "$OUTPUT" "$PKGDIR"
+
+          echo "PACKAGE_NAME=$OUTPUT" >> "$GITHUB_ENV"
+          echo "NEOVIM_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "ARCH=$APK_ARCH" >> "$GITHUB_ENV"
+
+      - name: 🚀 Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ env.NEOVIM_VERSION }}"
+          name: "Neovim Offline Package v${{ env.NEOVIM_VERSION }}-${{ env.ARCH }}"
+          files: ${{ env.PACKAGE_NAME }}
+          allow_updates: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
