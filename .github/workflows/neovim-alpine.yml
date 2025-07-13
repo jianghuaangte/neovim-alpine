@@ -1,67 +1,98 @@
-name: Build Neovim Offline Package (Fetch Only, No Install)
+name: Build Neovim Offline Package
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+  schedule:
+    - cron: '0 2 * * *'  # 每天凌晨2点运行
 
 jobs:
-  build:
+  fetch-x86_64:
+    name: Fetch Neovim for x86_64
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64, aarch64]
-
-    container: alpine:edge
-
+    container:
+      image: alpine:edge
     steps:
-      - name: 📂 Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: 🔧 Install Tools
+      - name: Fetch Neovim
         run: |
-          apk update
-          apk add curl tar git bash
-
-      - name: 📦 Fetch Neovim APKs Only (No Install)
-        id: fetch_neovim
-        run: |
-          APK_ARCH=${{ matrix.arch }}
-
-          PKGDIR="neovim-${APK_ARCH}"
-          mkdir -p "$PKGDIR"
-
-          # 配置 edge 仓库
+          uname -a
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
           apk update
+          mkdir -p /neovim-x86_64
+          apk fetch --recursive --output /neovim-x86_64 neovim
 
-          # 下载 neovim 及依赖包
-          apk fetch --recursive --output "$PKGDIR" neovim
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neovim-x86_64
+          path: /neovim-x86_64
 
-          # 解析版本号
-          NEOVIM_APK=$(ls "$PKGDIR"/neovim-*.apk | head -n 1)
-          if [ -z "$NEOVIM_APK" ]; then
-            echo "Neovim APK not found!"
-            exit 1
-          fi
+  fetch-arm64:
+    name: Fetch Neovim for aarch64
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: arm64v8/alpine:edge
+    steps:
+      - name: Fetch Neovim
+        run: |
+          uname -a
+          echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories
+          echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+          apk update
+          mkdir -p neovim-aarch64
+          apk fetch --recursive --output neovim-aarch64 neovim
 
-          VERSION=$(basename "$NEOVIM_APK" | sed -E 's/neovim-([0-9]+\.[0-9]+\.[0-9]+)-r[0-9]+\.apk/\1/')
-
-          OUTPUT="neovim-${VERSION}-${APK_ARCH}.tar.gz"
-          tar czf "$OUTPUT" "$PKGDIR"
-
-          echo "PACKAGE_NAME=$OUTPUT" >> "$GITHUB_ENV"
-          echo "NEOVIM_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "ARCH=$APK_ARCH" >> "$GITHUB_ENV"
-
-      - name: 🚀 Upload Release Asset
+      - name: Upload aarch64 to temp GitHub Release (draft)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v${{ env.NEOVIM_VERSION }}"
-          name: "Neovim Offline Package v${{ env.NEOVIM_VERSION }}-${{ env.ARCH }}"
-          files: ${{ env.PACKAGE_NAME }}
-          allow_updates: true
+          name: neovim-aarch64.tar.gz
+          tag_name: temp-arm-artifact-${{ github.run_id }}
+          draft: true
+          files: neovim-aarch64/**
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    name: Upload Final Release
+    needs: [fetch-x86_64, fetch-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download x86_64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: neovim-x86_64
+          path: artifacts/neovim-x86_64
+
+      - name: Install gh CLI
+        uses: cli/cli-action@v2
+
+      - name: Download aarch64 artifact from draft release
+        run: |
+          mkdir -p artifacts/neovim-aarch64
+          gh release download temp-arm-artifact-${{ github.run_id }} \
+            --pattern "*" \
+            --dir artifacts/neovim-aarch64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Archive for final release
+        run: |
+          mkdir -p release
+          tar -czf release/neovim-x86_64.tar.gz -C artifacts/neovim-x86_64 .
+          tar -czf release/neovim-aarch64.tar.gz -C artifacts/neovim-aarch64 .
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: neovim-offline-${{ github.run_number }}
+          name: Neovim Offline Package ${{ github.run_number }}
+          files: |
+            release/neovim-x86_64.tar.gz
+            release/neovim-aarch64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean up temporary ARM release (optional)
+        run: gh release delete temp-arm-artifact-${{ github.run_id }} --yes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
