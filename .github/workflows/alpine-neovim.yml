@@ -103,7 +103,7 @@ jobs:
       - name: Archive release files
         run: |
           mkdir -p release
-          tar -czf release/neovim-x86_64.tar.gz -C artifacts .
+          tar -czf release/neovim-x86_64.tar.gz -C artifacts $(basename ./artifacts/neovim-*.apk)
           tar -czf release/neovim-aarch64.tar.gz -C artifacts/neovim-aarch64 .
 
       - name: Upload to GitHub Release
