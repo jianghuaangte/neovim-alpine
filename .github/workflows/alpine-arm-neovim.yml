@@ -28,6 +28,8 @@ jobs:
   fetch-arm64:
     name: Fetch Neovim for aarch64
     runs-on: ubuntu-24.04-arm
+    container:
+      image: arm64v8/alpine:edge
     steps:
       - name: Fetch Neovim
         run: |
