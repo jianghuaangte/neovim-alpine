@@ -20,11 +20,13 @@ jobs:
           apk update
           mkdir -p /neovim-x86_64
           apk fetch --recursive --output /neovim-x86_64 neovim
+          tar -czf /neovim-x86_64.tar.gz -C /neovim-x86_64 .
+
       - name: Upload x86_64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: neovim-x86_64
-          path: /neovim-x86_64
+          path: /neovim-x86_64.tar.gz
 
   fetch-arm64:
     name: Fetch Neovim for aarch64
@@ -32,6 +34,9 @@ jobs:
     container:
       image: arm64v8/alpine:edge
     steps:
+      - name: Install tools
+        run: apk add git openssh tar
+
       - name: Fetch Neovim
         run: |
           uname -a
@@ -40,33 +45,77 @@ jobs:
           apk update
           mkdir -p neovim-aarch64
           apk fetch --recursive --output neovim-aarch64 neovim
-      - name: Upload aarch64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: neovim-aarch64
-          path: neovim-aarch64
+          tar -czf neovim-aarch64.tar.gz -C neovim-aarch64 .
+
+      - name: Push artifact to `arm` branch
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git clone --depth=1 --branch arm https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} repo
+          cp neovim-aarch64.tar.gz repo/neovim-aarch64.tar.gz
+          cd repo
+          git add neovim-aarch64.tar.gz
+          git commit -m "Add ARM64 build ${{ github.run_id }}" || true
+          git push origin arm
 
   release:
     name: Upload Release
     needs: [fetch-x86_64, fetch-arm64]
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
+      - name: Install GitHub CLI
+        run: sudo apt-get install -y gh
+
+      - name: Download x86_64 artifact
         uses: actions/download-artifact@v4
         with:
+          name: neovim-x86_64
           path: ./artifacts
+
+      - name: Extract Neovim version
+        id: extract-version
+        run: |
+          mkdir tmp && tar -xzf ./artifacts/neovim-x86_64.tar.gz -C tmp
+          version=$(tar -tf ./artifacts/neovim-x86_64.tar.gz | grep -m1 neovim | xargs -I{} sh -c "tar -xf ./artifacts/neovim-x86_64.tar.gz {} -O | grep -Eo 'NVIM v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 | cut -d' ' -f2")
+          echo "Neovim version: $version"
+          echo "version=$version" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Check if release tag already exists
+        id: check-tag
+        run: |
+          tag="neovim-${{ steps.extract-version.outputs.version }}"
+          echo "Checking for tag: $tag"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists. Skipping release."
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag $tag not found. Will create release."
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch ARM64 artifact from `arm` branch
+        run: |
+          git clone --depth=1 --branch arm https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} arm-branch
+          mkdir -p ./artifacts/neovim-aarch64
+          tar -xzf arm-branch/neovim-aarch64.tar.gz -C ./artifacts/neovim-aarch64
 
       - name: Archive for release
         run: |
           mkdir -p release
-          tar -czf release/neovim-x86_64.tar.gz -C artifacts/neovim-x86_64 .
+          mv ./artifacts/neovim-x86_64.tar.gz release/
           tar -czf release/neovim-aarch64.tar.gz -C artifacts/neovim-aarch64 .
 
       - name: Upload to GitHub Release
+        if: steps.check-tag.outputs.found != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: neovim-offline-${{ github.run_number }}
-          name: Neovim Offline Package #${{ github.run_number }}
+          tag_name: neovim-${{ steps.extract-version.outputs.version }}
+          name: Neovim Offline Package - v${{ steps.extract-version.outputs.version }}
           files: |
             release/neovim-x86_64.tar.gz
             release/neovim-aarch64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
