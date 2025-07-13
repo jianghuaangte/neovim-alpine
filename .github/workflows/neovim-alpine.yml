@@ -1,0 +1,51 @@
+name: Build Neovim Offline Package (Fetch Only, No Install)
+
+on:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: alpine:edge
+
+    steps:
+      - name: 📂 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔧 Install Tools
+        run: |
+          apk update
+          apk add curl tar git
+
+      - name: 📦 Fetch Neovim APKs Only (No Install)
+        run: |
+          VERSION=edge
+          ARCH=$(uname -m)
+          PKGDIR="neovim-${ARCH}"
+          OUTPUT="neovim-${VERSION}-${ARCH}.tar.gz"
+
+          mkdir -p "$PKGDIR"
+          cd "$PKGDIR"
+
+          # 配置 edge 仓库
+          echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories
+          echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+
+          # 更新索引
+          apk update
+
+          # 下载 Neovim 及所有依赖 .apk 文件，仅下载
+          apk fetch --recursive --output . neovim
+
+          cd ..
+          tar czf "$OUTPUT" "$PKGDIR"
+          echo "PACKAGE_NAME=$OUTPUT" >> "$GITHUB_ENV"
+
+      - name: 🚀 Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PACKAGE_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
