@@ -1,4 +1,4 @@
-name: Build Neovim Offline Package
+name: Alpine-Neovim
 
 on:
   workflow_dispatch:
@@ -20,19 +20,23 @@ jobs:
           apk update
           mkdir -p /neovim-x86_64
           apk fetch --recursive --output /neovim-x86_64 neovim
+          tar -czf /neovim-x86_64.tar.gz -C /neovim-x86_64 .
 
       - name: Upload x86_64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: neovim-x86_64
-          path: /neovim-x86_64
+          path: /neovim-x86_64.tar.gz
 
   fetch-arm64:
     name: Fetch Neovim for aarch64
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-22.04-arm
     container:
       image: arm64v8/alpine:edge
     steps:
+      - name: Install tools
+        run: apk add git openssh tar
+
       - name: Fetch Neovim
         run: |
           uname -a
@@ -41,19 +45,21 @@ jobs:
           apk update
           mkdir -p neovim-aarch64
           apk fetch --recursive --output neovim-aarch64 neovim
+          tar -czf neovim-aarch64.tar.gz -C neovim-aarch64 .
 
-      - name: Upload aarch64 to temp GitHub Release (draft)
-        uses: softprops/action-gh-release@v2
-        with:
-          name: neovim-aarch64.tar.gz
-          tag_name: temp-arm-artifact-${{ github.run_id }}
-          draft: true
-          files: neovim-aarch64/**
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push artifact to builds branch
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git clone --depth=1 --branch builds https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} repo
+          cp neovim-aarch64.tar.gz repo/neovim-aarch64.tar.gz
+          cd repo
+          git add neovim-aarch64.tar.gz
+          git commit -m "Add ARM64 build ${{ github.run_id }}" || true
+          git push origin builds
 
   release:
-    name: Upload Final Release
+    name: Upload Release
     needs: [fetch-x86_64, fetch-arm64]
     runs-on: ubuntu-latest
     steps:
@@ -61,38 +67,27 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: neovim-x86_64
-          path: artifacts/neovim-x86_64
+          path: ./artifacts
 
-      - name: Install gh CLI
-        uses: cli/cli-action@v2
-
-      - name: Download aarch64 artifact from draft release
+      - name: Fetch ARM64 artifact from builds branch
         run: |
-          mkdir -p artifacts/neovim-aarch64
-          gh release download temp-arm-artifact-${{ github.run_id }} \
-            --pattern "*" \
-            --dir artifacts/neovim-aarch64
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          git clone --depth=1 --branch builds https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} builds
+          mkdir -p ./artifacts/neovim-aarch64
+          tar -xzf builds/neovim-aarch64.tar.gz -C ./artifacts/neovim-aarch64
 
-      - name: Archive for final release
+      - name: Archive for release
         run: |
           mkdir -p release
-          tar -czf release/neovim-x86_64.tar.gz -C artifacts/neovim-x86_64 .
+          mv ./artifacts/neovim-x86_64.tar.gz release/
           tar -czf release/neovim-aarch64.tar.gz -C artifacts/neovim-aarch64 .
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: neovim-offline-${{ github.run_number }}
-          name: Neovim Offline Package ${{ github.run_number }}
+          name: Neovim Offline Package #${{ github.run_number }}
           files: |
             release/neovim-x86_64.tar.gz
             release/neovim-aarch64.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Clean up temporary ARM release (optional)
-        run: gh release delete temp-arm-artifact-${{ github.run_id }} --yes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
