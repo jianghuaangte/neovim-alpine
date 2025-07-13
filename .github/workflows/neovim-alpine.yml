@@ -60,7 +60,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ env.NEOVIM_VERSION }}"
-          name: "Neovim Offline Package v${{ env.NEOVIM_VERSION }}"
+          name: "Neovim Offline Package v${{ env.NEOVIM_VERSION }}-${{ env.ARCH }}"
           files: ${{ env.PACKAGE_NAME }}
+          allow_updates: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
