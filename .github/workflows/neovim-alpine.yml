@@ -47,16 +47,16 @@ jobs:
           apk fetch --recursive --output neovim-aarch64 neovim
           tar -czf neovim-aarch64.tar.gz -C neovim-aarch64 .
 
-      - name: Push artifact to builds branch
+      - name: Push artifact to `arm` branch
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
-          git clone --depth=1 --branch builds https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} repo
+          git clone --depth=1 --branch arm https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} repo
           cp neovim-aarch64.tar.gz repo/neovim-aarch64.tar.gz
           cd repo
           git add neovim-aarch64.tar.gz
           git commit -m "Add ARM64 build ${{ github.run_id }}" || true
-          git push origin builds
+          git push origin arm
 
   release:
     name: Upload Release
@@ -69,11 +69,11 @@ jobs:
           name: neovim-x86_64
           path: ./artifacts
 
-      - name: Fetch ARM64 artifact from builds branch
+      - name: Fetch ARM64 artifact from `arm` branch
         run: |
-          git clone --depth=1 --branch builds https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} builds
+          git clone --depth=1 --branch arm https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} arm-branch
           mkdir -p ./artifacts/neovim-aarch64
-          tar -xzf builds/neovim-aarch64.tar.gz -C ./artifacts/neovim-aarch64
+          tar -xzf arm-branch/neovim-aarch64.tar.gz -C ./artifacts/neovim-aarch64
 
       - name: Archive for release
         run: |
