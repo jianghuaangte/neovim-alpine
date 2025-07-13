@@ -1,14 +1,18 @@
 name: Build Neovim Offline Package (Fetch Only, No Install)
 
 on:
-  workflow_dispatch:   # 手动触发
+  workflow_dispatch:
   push:
     tags:
-      - "v*"           # 依然支持手动推送 tag 触发（备用）
+      - "v*"
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+
     container: alpine:edge
 
     steps:
@@ -23,16 +27,7 @@ jobs:
       - name: 📦 Fetch Neovim APKs Only (No Install)
         id: fetch_neovim
         run: |
-          # 获取架构信息，统一映射为 apk 支持的架构名
-          ARCH=$(uname -m)
-          if [ "$ARCH" = "x86_64" ]; then
-            APK_ARCH="x86_64"
-          elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-            APK_ARCH="aarch64"
-          else
-            echo "Unsupported architecture: $ARCH"
-            exit 1
-          fi
+          APK_ARCH=${{ matrix.arch }}
 
           PKGDIR="neovim-${APK_ARCH}"
           mkdir -p "$PKGDIR"
@@ -42,17 +37,16 @@ jobs:
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
           apk update
 
-          # 下载 neovim 及所有依赖 .apk 文件，仅下载
+          # 下载 neovim 及依赖包
           apk fetch --recursive --output "$PKGDIR" neovim
 
-          # 从下载的 apk 中解析 neovim 版本号（示例用 basename 去掉版本获取）
+          # 解析版本号
           NEOVIM_APK=$(ls "$PKGDIR"/neovim-*.apk | head -n 1)
           if [ -z "$NEOVIM_APK" ]; then
             echo "Neovim APK not found!"
             exit 1
           fi
 
-          # 版本号一般格式：neovim-0.9.1-r0.apk，提取 0.9.1
           VERSION=$(basename "$NEOVIM_APK" | sed -E 's/neovim-([0-9]+\.[0-9]+\.[0-9]+)-r[0-9]+\.apk/\1/')
 
           OUTPUT="neovim-${VERSION}-${APK_ARCH}.tar.gz"
@@ -62,11 +56,11 @@ jobs:
           echo "NEOVIM_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "ARCH=$APK_ARCH" >> "$GITHUB_ENV"
 
-      - name: 🚀 Create Release and Upload Package
+      - name: 🚀 Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v${{ env.NEOVIM_VERSION }}-${{ env.ARCH }}"
-          name: "Neovim Offline Package v${{ env.NEOVIM_VERSION }} (${ { env.ARCH } })"
+          tag_name: "v${{ env.NEOVIM_VERSION }}"
+          name: "Neovim Offline Package v${{ env.NEOVIM_VERSION }}"
           files: ${{ env.PACKAGE_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
