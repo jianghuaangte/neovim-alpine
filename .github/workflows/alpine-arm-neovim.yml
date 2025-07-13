@@ -3,7 +3,7 @@ name: Alpine2
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'  # 每天凌晨2点运行
+    - cron: '0 2 * * *'
 
 jobs:
   fetch-x86_64:
@@ -12,21 +12,19 @@ jobs:
     container:
       image: alpine:edge
     steps:
-      - name: Fetch Neovim
+      - name: Fetch Neovim .apk
         run: |
-          uname -a
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
           apk update
           mkdir -p /neovim-x86_64
           apk fetch --recursive --output /neovim-x86_64 neovim
-          tar -czf /neovim-x86_64.tar.gz -C /neovim-x86_64 .
 
-      - name: Upload x86_64 artifact
+      - name: Upload x86_64 .apk artifact
         uses: actions/upload-artifact@v4
         with:
           name: neovim-x86_64
-          path: /neovim-x86_64.tar.gz
+          path: /neovim-x86_64/*.apk
 
   fetch-arm64:
     name: Fetch Neovim for aarch64
@@ -39,7 +37,6 @@ jobs:
 
       - name: Fetch Neovim
         run: |
-          uname -a
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
           apk update
@@ -66,32 +63,31 @@ jobs:
       - name: Install GitHub CLI
         run: sudo apt-get update && sudo apt-get install -y gh
 
-      - name: Download x86_64 artifact
+      - name: Download x86_64 .apk
         uses: actions/download-artifact@v4
         with:
           name: neovim-x86_64
           path: ./artifacts
 
-      - name: Extract version from neovim apk filename
+      - name: Extract version from APK filename
         id: extract-version
         run: |
-          apk_file=$(ls ./artifacts/neovim-x86_64/neovim-*.apk | head -n1)
-          echo "APK file found: $apk_file"
-          # 提取版本号，比如从 neovim-0.10.0-r0.apk 得到 0.10.0
+          apk_file=$(ls ./artifacts/neovim-*.apk | head -n1)
+          echo "APK file: $apk_file"
           version=$(basename "$apk_file" | grep -oP 'neovim-\K[0-9]+\.[0-9]+\.[0-9]+')
           if [ -z "$version" ]; then
-            echo "::error::Failed to extract version from APK filename"
+            echo "::error::Failed to extract version"
             exit 1
           fi
+          echo "Extracted version: $version"
           echo "version=$version" >> $GITHUB_OUTPUT
 
-      - name: Check if tag exists
+      - name: Check if release tag exists
         id: check_tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="neovim-v${{ steps.extract-version.outputs.version }}"
-          echo "Checking if tag $TAG exists"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "found=true" >> $GITHUB_OUTPUT
           else
@@ -104,10 +100,10 @@ jobs:
           mkdir -p ./artifacts/neovim-aarch64
           tar -xzf arm-branch/neovim-aarch64.tar.gz -C ./artifacts/neovim-aarch64
 
-      - name: Archive for release
+      - name: Archive release files
         run: |
           mkdir -p release
-          mv ./artifacts/neovim-x86_64.tar.gz release/
+          tar -czf release/neovim-x86_64.tar.gz -C artifacts .
           tar -czf release/neovim-aarch64.tar.gz -C artifacts/neovim-aarch64 .
 
       - name: Upload to GitHub Release
