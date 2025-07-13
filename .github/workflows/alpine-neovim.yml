@@ -1,4 +1,4 @@
-name: Alpine2
+name: Alpine-Neovim
 
 on:
   workflow_dispatch:
