@@ -1,4 +1,4 @@
-name: Build Neovim Offline Package
+name: Alpine2
 
 on:
   workflow_dispatch:
@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install GitHub CLI
-        run: sudo apt-get install -y gh
+        run: sudo apt-get update && sudo apt-get install -y gh
 
       - name: Download x86_64 artifact
         uses: actions/download-artifact@v4
@@ -72,45 +72,31 @@ jobs:
           name: neovim-x86_64
           path: ./artifacts
 
-      - name: Extract Neovim version
+      - name: Extract version from neovim apk filename
         id: extract-version
         run: |
-          mkdir -p tmp
-          tar -xzf ./artifacts/neovim-x86_64.tar.gz -C tmp
-
-          apk_file=$(find tmp -name "neovim-*.apk" | head -n1)
-          echo "Found APK: $apk_file"
-
-          mkdir -p tmp/apk
-          tar -xzf "$apk_file" -C tmp/apk
-
-          chmod +x tmp/apk/usr/bin/nvim
-
-          version=$(tmp/apk/usr/bin/nvim --version | grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
-
+          apk_file=$(ls ./artifacts/neovim-x86_64/neovim-*.apk | head -n1)
+          echo "APK file found: $apk_file"
+          # 提取版本号，比如从 neovim-0.10.0-r0.apk 得到 0.10.0
+          version=$(basename "$apk_file" | grep -oP 'neovim-\K[0-9]+\.[0-9]+\.[0-9]+')
           if [ -z "$version" ]; then
-            echo "::error ::Failed to extract Neovim version"
+            echo "::error::Failed to extract version from APK filename"
             exit 1
           fi
-
-          echo "Extracted version: $version"
           echo "version=$version" >> $GITHUB_OUTPUT
 
-
-      - name: Check if release tag already exists
-        id: check-tag
+      - name: Check if tag exists
+        id: check_tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="neovim-${{ steps.extract-version.outputs.version }}"
-          echo "Checking for tag: $tag"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Tag $tag already exists. Skipping release."
+          TAG="neovim-v${{ steps.extract-version.outputs.version }}"
+          echo "Checking if tag $TAG exists"
+          if gh release view "$TAG" >/dev/null 2>&1; then
             echo "found=true" >> $GITHUB_OUTPUT
           else
-            echo "Tag $tag not found. Will create release."
             echo "found=false" >> $GITHUB_OUTPUT
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Fetch ARM64 artifact from `arm` branch
         run: |
@@ -125,11 +111,11 @@ jobs:
           tar -czf release/neovim-aarch64.tar.gz -C artifacts/neovim-aarch64 .
 
       - name: Upload to GitHub Release
-        if: steps.check-tag.outputs.found != 'true'
+        if: steps.check_tag.outputs.found == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: neovim-${{ steps.extract-version.outputs.version }}
-          name: Neovim Offline Package - v${{ steps.extract-version.outputs.version }}
+          tag_name: neovim-v${{ steps.extract-version.outputs.version }}
+          name: Neovim Alpine v${{ steps.extract-version.outputs.version }}
           files: |
             release/neovim-x86_64.tar.gz
             release/neovim-aarch64.tar.gz
