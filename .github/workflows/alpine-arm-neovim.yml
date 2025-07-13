@@ -75,11 +75,12 @@ jobs:
       - name: Extract Neovim version
         id: extract-version
         run: |
-          mkdir tmp && tar -xzf ./artifacts/neovim-x86_64.tar.gz -C tmp
-          version=$(tar -tf ./artifacts/neovim-x86_64.tar.gz | grep -m1 neovim | xargs -I{} sh -c "tar -xf ./artifacts/neovim-x86_64.tar.gz {} -O | grep -Eo 'NVIM v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 | cut -d' ' -f2")
+          mkdir -p tmp
+          tar -xzf ./artifacts/neovim-x86_64.tar.gz -C tmp
+          chmod +x tmp/usr/bin/nvim
+          version=$(tmp/usr/bin/nvim --version | grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
           echo "Neovim version: $version"
           echo "version=$version" >> $GITHUB_OUTPUT
-        shell: bash
 
       - name: Check if release tag already exists
         id: check-tag
