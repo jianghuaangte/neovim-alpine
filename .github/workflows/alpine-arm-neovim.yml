@@ -1,62 +1,57 @@
-name: Build Neovim ARM Only
+name: Build Neovim Offline ARM
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 jobs:
-  fetch:
+  build:
     runs-on: ubuntu-24.04-arm
     container: alpine:edge
-    outputs:
-      version: ${{ steps.fetch_neovim.outputs.version }}
-      package_name: ${{ steps.fetch_neovim.outputs.package_name }}
+
     steps:
-      - name: 🔧 Install Tools
+      - name: 🔧 Install tools
         run: apk add curl tar bash git
 
-      - name: 📦 Fetch Neovim APKs
-        id: fetch_neovim
+      - name: 📦 Build Neovim Package
         run: |
-          APK_ARCH=aarch64
-          PKGDIR="neovim-${APK_ARCH}"
-          mkdir -p "$PKGDIR"
-
+          ARCH=aarch64
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
           apk update
-          apk fetch --recursive --output "$PKGDIR" neovim
+          apk fetch --recursive --output neovim-$ARCH neovim
 
-          NEOVIM_APK=$(ls "$PKGDIR"/neovim-*.apk | head -n 1)
+          NEOVIM_APK=$(ls neovim-$ARCH/neovim-*.apk | head -n 1)
           VERSION=$(basename "$NEOVIM_APK" | sed -E 's/neovim-([0-9]+\.[0-9]+\.[0-9]+)-r[0-9]+\.apk/\1/')
-          OUTPUT="neovim-${VERSION}-${APK_ARCH}.tar.gz"
-          tar czf "$OUTPUT" "$PKGDIR"
+          TAR="neovim-${VERSION}-${ARCH}.tar.gz"
+          tar czf "$TAR" neovim-$ARCH
 
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "package_name=$OUTPUT" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/output
+          mv "$TAR" /tmp/output/
 
-      - name: 📦 Upload artifact for next job
-        uses: actions/upload-artifact@v4
-        with:
-          name: neovim-arm-tar
-          path: neovim-*.tar.gz
+      # ✅ JS Action 移出容器，用 artifact 命令从 `/tmp/output/` 传给下一阶段
+      - name: ✅ Save build artifact
+        shell: sh
+        run: |
+          echo "::group::Move artifact"
+          cp /tmp/output/*.tar.gz .
+          echo "::endgroup::"
 
-  release:
+  upload:
     runs-on: ubuntu-latest
-    needs: fetch
+    needs: build
+
     steps:
-      - name: ⬇️ Download artifact
+      - name: 🧾 Download artifact from previous job
         uses: actions/download-artifact@v4
         with:
-          name: neovim-arm-tar
+          name: artifact
+          path: .
 
       - name: 🚀 Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v${{ needs.fetch.outputs.version }}"
-          name: "Neovim Offline ARM v${{ needs.fetch.outputs.version }}"
+          tag_name: "v0.11.1"
+          name: "Neovim Offline Package ARM"
           files: neovim-*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
