@@ -1,57 +1,72 @@
-name: Build Neovim Offline ARM
+name: Build Neovim Offline Package
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'  # 每天凌晨2点运行
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04-arm
-    container: alpine:edge
-
+  fetch-x86_64:
+    name: Fetch Neovim for x86_64
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:edge
     steps:
-      - name: 🔧 Install tools
-        run: apk add curl tar bash git
-
-      - name: 📦 Build Neovim Package
+      - name: Fetch Neovim
         run: |
-          ARCH=aarch64
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
           apk update
-          apk fetch --recursive --output neovim-$ARCH neovim
+          mkdir -p /neovim-x86_64
+          apk fetch --recursive --output /neovim-x86_64 neovim
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neovim-x86_64
+          path: /neovim-x86_64
 
-          NEOVIM_APK=$(ls neovim-$ARCH/neovim-*.apk | head -n 1)
-          VERSION=$(basename "$NEOVIM_APK" | sed -E 's/neovim-([0-9]+\.[0-9]+\.[0-9]+)-r[0-9]+\.apk/\1/')
-          TAR="neovim-${VERSION}-${ARCH}.tar.gz"
-          tar czf "$TAR" neovim-$ARCH
-
-          mkdir -p /tmp/output
-          mv "$TAR" /tmp/output/
-
-      # ✅ JS Action 移出容器，用 artifact 命令从 `/tmp/output/` 传给下一阶段
-      - name: ✅ Save build artifact
-        shell: sh
-        run: |
-          echo "::group::Move artifact"
-          cp /tmp/output/*.tar.gz .
-          echo "::endgroup::"
-
-  upload:
-    runs-on: ubuntu-latest
-    needs: build
-
+  fetch-arm64:
+    name: Fetch Neovim for aarch64
+    runs-on: ubuntu-24.04-arm
     steps:
-      - name: 🧾 Download artifact from previous job
+      - name: Install apk-tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apk-tools
+      - name: Fetch Neovim
+        run: |
+          echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" | sudo tee /etc/apk/repositories
+          echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" | sudo tee -a /etc/apk/repositories
+          sudo apk update
+          mkdir -p neovim-aarch64
+          sudo apk fetch --recursive --output neovim-aarch64 neovim
+      - name: Upload aarch64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neovim-aarch64
+          path: neovim-aarch64
+
+  release:
+    name: Upload Release
+    needs: [fetch-x86_64, fetch-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: artifact
-          path: .
+          path: ./artifacts
 
-      - name: 🚀 Upload to GitHub Release
+      - name: Archive for release
+        run: |
+          mkdir -p release
+          tar -czf release/neovim-x86_64.tar.gz -C artifacts/neovim-x86_64 .
+          tar -czf release/neovim-aarch64.tar.gz -C artifacts/neovim-aarch64 .
+
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v0.11.1"
-          name: "Neovim Offline Package ARM"
-          files: neovim-*.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: neovim-offline-${{ github.run_number }}
+          name: Neovim Offline Package #${{ github.run_number }}
+          files: |
+            release/neovim-x86_64.tar.gz
+            release/neovim-aarch64.tar.gz
