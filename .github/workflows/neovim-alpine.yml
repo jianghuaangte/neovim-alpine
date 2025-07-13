@@ -1,51 +1,90 @@
-name: Build Neovim Offline Package (Fetch Only, No Install)
+name: Build Neovim Offline Package for Multiple Architectures
 
 on:
   schedule:
-    - cron: '0 18 * * *'
+    - cron: '0 18 * * *'    # UTC 18:00 = 北京时间 2:00
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+
     container: alpine:edge
 
+    env:
+      VERSION: edge
+
     steps:
-      - name: 📂 Checkout Repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 🔧 Install Tools
+      - name: Install tools
         run: |
           apk update
-          apk add curl tar git
+          apk add curl tar git bash
 
-      - name: 📦 Fetch Neovim APKs Only (No Install)
+      - name: Set ARCH environment variable
+        run: echo "ARCH=${{ matrix.arch }}" >> $GITHUB_ENV
+
+      - name: Configure Alpine edge repositories
         run: |
-          VERSION=edge
-          ARCH=$(uname -m)
-          PKGDIR="neovim-${ARCH}"
-          OUTPUT="neovim-${VERSION}-${ARCH}.tar.gz"
-
-          mkdir -p "$PKGDIR"
-          cd "$PKGDIR"
-
-          # 配置 edge 仓库
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories
           echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
-
-          # 更新索引
           apk update
 
-          # 下载 Neovim 及所有依赖 .apk 文件，仅下载
+      - name: Fetch Neovim and dependencies APKs (arch=${{ env.ARCH }})
+        run: |
+          mkdir -p neovim-${ARCH}
+          cd neovim-${ARCH}
           apk fetch --recursive --output . neovim
-
           cd ..
-          tar czf "$OUTPUT" "$PKGDIR"
-          echo "PACKAGE_NAME=$OUTPUT" >> "$GITHUB_ENV"
 
-      - name: 🚀 Upload to GitHub Releases
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.PACKAGE_NAME }}
+      - name: Install Neovim to get version (arch=${{ env.ARCH }})
+        run: |
+          apk add --allow-untrusted --no-network --cache-dir ./neovim-${ARCH} ./neovim-${ARCH}/*.apk
+
+      - name: Get Neovim version
+        id: get_version
+        run: |
+          NVIM_VER=$(nvim --version | head -1 | awk '{print $2}')
+          echo "version=$NVIM_VER" >> $GITHUB_OUTPUT
+
+      - name: Create Git Tag and push (only on first arch)
+        if: matrix.arch == 'x86_64'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          TAG="v${{ steps.get_version.outputs.version }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Package offline tarball (arch=${{ env.ARCH }})
+        run: |
+          tar czf neovim-${ARCH}-v${{ steps.get_version.outputs.version }}.tar.gz neovim-${ARCH}
+
+      - name: Create GitHub Release (only once, on x86_64)
+        if: matrix.arch == 'x86_64'
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: "v${{ steps.get_version.outputs.version }}"
+          release_name: "Neovim v${{ steps.get_version.outputs.version }}"
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset (arch=${{ env.ARCH }})
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./neovim-${ARCH}-v${{ steps.get_version.outputs.version }}.tar.gz
+          asset_name: neovim-${ARCH}-v${{ steps.get_version.outputs.version }}.tar.gz
+          asset_content_type: application/gzip
