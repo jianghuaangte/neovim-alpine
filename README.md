@@ -1,2 +1,2 @@
 # neovim-alpine
-alpine 一键安装最新版 neovim 脚本
+同步最新版neovim
